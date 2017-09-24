@@ -1,0 +1,286 @@
+---
+title: "STATCON"
+author: "Ryan Borowicz"
+date: "April 14, 2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(dplyr)
+library(data.table)
+library(XML)
+library(methods)
+library(Hmisc)
+library(lubridate)
+library(C50) 
+library(gmodels) 
+library(ROCR)
+library(party)
+library(rpart)				        
+library(rattle)					
+library(rpart.plot)	
+library(caret)
+library(kernlab)  
+library(randomForest) 
+library(nnet)
+library(caTools)
+library(ggplot2)
+library(DMwR)
+library(ROSE)
+```
+
+## FAQ
+
+http://www.stat.umn.edu/statcom/competition/location-and-schedule/
+
+Example Questions:
+1. Which month has the lowest recreational visits?
+2. Can you get some insights from the data about why this month has low recreational visits?
+3. Do any of the variables have lag effects on the recreational visitation? Why?
+
+```{r}
+set.seed = 415
+```
+
+## Libraries
+```{r}
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(stringr)
+library(tidyr)
+library(readr)
+library(readxl)
+library(ggmap)
+library(RDSTK)
+library(jsonlite)
+library(RecordLinkage)
+install.packages("ggmap")
+#library(data.table)
+#library(splitstackshape)
+```
+
+## SETWD
+```{r}
+#folder <- "C:/Users/borow/Desktop/00_Coding/Projects/2017_04_STATCON_National_Park_Exploration"
+folder <- "C:/Users/Lavanya/Google Drive/2017_04_STATCON_National_Park_Exploration"
+setwd(folder)
+```
+
+## Load Data
+
+```{r}
+parks <- c("Acadia National Park",
+"Arches National Park",
+"Badlands National Park",
+"Biscayne National Park",
+"Bryce Canyon National Park",
+"Canyonlands National Park",
+"Capitol Reef National Park",
+"Crater Lake National Park",
+"Death Valley National Park",
+"Denali National Park & PRES",
+"Everglades National Park",
+"Glacier Bay National Park & PRES",
+"Glacier National Park",
+"Grand Canyon National Park",
+"Grand Teton National Park",
+"Great Smoky Mountains National Park",
+"Haleakala National Park",
+"Hawaii Volcanoes National Park",
+"Hot Springs National Park",
+"Joshua Tree National Park",
+"Kings Canyon National Park",
+"Lassen Volcanic National Park",
+"Mammoth Cave National Park",
+"Mesa Verde National Park",
+"Mount Rainier National Park",
+"Olympic National Park",
+"Petrified Forest National Park",
+"Redwood National Park",
+"Rocky Mountain National Park",
+"Saguaro National Park",
+"Sequoia National Park",
+"Shenandoah National Park",
+"Theodore Roosevelt National Park",
+"Wind Cave National Park",
+"Yellowstone National Park",
+"Yosemite National Park",
+"Zion National Park")
+
+park_geocodes <- geocode(parks,
+                         output = "more",
+                         source = "google")
+
+park_geocodes <- read.csv("park_geocodes.csv")
+```
+
+
+```{r}
+#sample_data <- read_excel("sample_data.xlsx",sheet = "sample_data")
+np_data <- fread("NP_Data2.csv")
+colnames(np_data) <- c(
+  "park_name" , "recreation_hrs" , "concessioner_lodging" ,  "concessioner_camping" , "tent_campers" ,   "rv_campers", "backcountry_campers","recreation_visits" , "lowest_temp" , "highest_temp" , "warmest_min_temp", "coldest_max_temp", "avg_min_temp" , "avg_max_temp", "avg_temp", "total_precipitation" ,                            
+"total_snowfall" , "max_24hr_precipitation" , "max_24hr_snowfall" ,  "weather_station" ,                                  
+"date" , "3m_pc_airfare_cost"  , "3m_pc_away_from_home_food_cost" ,   "3m_pc_gasoline_cost" ,             
+"3m_pc_fuel_cost" ,"3m_pc_away_from_home_lodge_cost",
+"cpi"  , "csi"  , "unemployment_rate"  
+)
+```
+
+## EDA
+```{r}
+np_data$date1 <- as.Date(np_data$date, "%m/%d/%Y")
+np_data <- np_data %>%
+ mutate(year = year(date1),
+        month = month(date1),
+        day = mday(date1),
+        week = wday(date1) )
+
+np_data2 <- merge(np_data, park_geocodes, by.x = "park_name", by.y = "establishment")
+```
+
+```{r}
+np_data2$recreation_hrs <- as.numeric(gsub(",","",np_data2$recreation_hrs))
+np_data2$recreation_visits <- as.numeric(gsub(",","",np_data2$recreation_visits))
+np_data2$recreation_hr_per_visit <- np_data2$recreation_hrs / np_data2$recreation_visits
+np_data2$concessioner_lodging <- as.numeric(gsub(",","",np_data2$concessioner_lodging))
+np_data2$concessioner_camping <- as.numeric(gsub(",","",np_data2$concessioner_camping))
+np_data2$rv_campers <- as.numeric(gsub(",","",np_data2$rv_campers))
+np_data2$tent_campers <- as.numeric(gsub(",","",np_data2$tent_campers))
+np_data2$backcountry_campers <- as.numeric(gsub(",","",np_data2$backcountry_campers))
+np_data2$temp_fluctuation <- np_data2$avg_max_temp - np_data2$avg_min_temp
+np_data3 <- subset(np_data2, select = c(
+  "park_name" , "lat", "lon","address","north","south","east","west","administrative_area_level_1","date","year","month","day", "week", "recreation_hr_per_visit", "recreation_hrs" , "concessioner_lodging" ,  "concessioner_camping" , "tent_campers" ,   "rv_campers", "backcountry_campers","recreation_visits" , "avg_min_temp" , "avg_max_temp", "avg_temp", "temp_fluctuation","total_precipitation" ,   "total_snowfall" ,  "weather_station" ,                                  
+"date" , "3m_pc_airfare_cost"  , "3m_pc_away_from_home_food_cost" ,   "3m_pc_gasoline_cost" ,             
+"3m_pc_fuel_cost" ,"3m_pc_away_from_home_lodge_cost", "cpi"  , "csi"  , "unemployment_rate" 
+))
+colnames(np_data3) <- c(
+  "park_name" , "lat", "lon","address","north","south","east","west","state","date","year","month","day", "week", "recreation_hr_per_visit", "recreation_hrs" , "concessioner_lodging" ,  "concessioner_camping" , "tent_campers" ,   "rv_campers", "backcountry_campers","recreation_visits" , "avg_min_temp" , "avg_max_temp", "avg_temp", "temp_fluctuation","total_precipitation" ,   "total_snowfall" ,  "weather_station" ,                                  
+"date" , "3m_pc_airfare_cost"  , "3m_pc_away_from_home_food_cost" ,   "3m_pc_gasoline_cost" ,             
+"3m_pc_fuel_cost" ,"3m_pc_away_from_home_lodge_cost", "cpi"  , "csi"  , "unemployment_rate" 
+)
+
+regions <- read.csv("regions.csv")
+colnames(regions) <- c("state","region")
+
+
+np_data4 <- merge(np_data3, regions, by = "state")
+
+cluster <- read.csv("park_cluster.csv")
+d <- merge(np_data4, cluster, by = "park_name")
+write.csv(d, "np_data_after_processing1.csv")
+
+
+```
+
+
+```{r}
+na_count <- data.frame(cnt = sapply(np_data2, function(x) sum(length(which(is.na(x))))))
+```
+
+```{r}
+str(np_data4)
+np_data4$year <- as.factor(np_data4$year)
+np_data4$month <- as.factor(np_data4$month)
+
+rec_visits_data <- subset(np_data4, select = c("park_name","year","month","recreation_visits"))
+d1 <- rec_visits_data %>% group_by(month) %>% summarise(avg_recr_visits = mean(recreation_visits))
+rec_visits <- rec_visits_data %>% group_by(park_name, month) %>% summarise(avg_recr_visits = mean(recreation_visits))
+write.csv(rec_visits,"rec_visits.csv")
+
+```
+
+
+```{r}
+summary(np_data4$recreation_visits)
+ggplot(np_data4, aes(recreation_visits)) + geom_density(fill = "green", alpha = "0.7")
+
+cor_data <- subset(np_data4, select = c(
+   "recreation_visits", "recreation_hrs" , "concessioner_lodging" ,  "concessioner_camping" , "tent_campers" ,   "rv_campers", "backcountry_campers", "avg_min_temp" , "avg_max_temp", "avg_temp", "temp_fluctuation","total_precipitation" ,   "total_snowfall" ,   "3m_pc_airfare_cost"  , "3m_pc_away_from_home_food_cost" ,   "3m_pc_gasoline_cost" ,             
+"3m_pc_fuel_cost" ,"3m_pc_away_from_home_lodge_cost", "cpi"  , "csi"  , "unemployment_rate" ))
+cor(cor_data, method = "pearson", use = "complete.obs")
+```
+
+
+```{r}
+
+model_data <- subset(np_data4, select = c("recreation_visits",  "avg_min_temp" , "avg_max_temp", "avg_temp", "total_precipitation" ,   "total_snowfall" ,   "3m_pc_airfare_cost"  , "3m_pc_away_from_home_food_cost" ,   "3m_pc_gasoline_cost" , "3m_pc_fuel_cost" ,"3m_pc_away_from_home_lodge_cost", "cpi"  , "csi"  , "unemployment_rate" 
+))
+model <- lm(recreation_visits ~ ., data = model_data)
+summary(model)
+
+model_data <- subset(np_data4, select = c("tent_campers" ,  "avg_min_temp" , "avg_max_temp", "avg_temp", "total_precipitation" ,   "total_snowfall" ,   "3m_pc_airfare_cost"  , "3m_pc_away_from_home_food_cost" ,   "3m_pc_gasoline_cost" , "3m_pc_fuel_cost" ,"3m_pc_away_from_home_lodge_cost", "cpi"  , "csi"  , "unemployment_rate" 
+))
+model <- lm(tent_campers ~ ., data = model_data)
+summary(model)
+
+model_data <- subset(np_data4, select = c("rv_campers" ,  "avg_min_temp" , "avg_max_temp", "avg_temp", "total_precipitation" ,   "total_snowfall" ,   "3m_pc_airfare_cost"  , "3m_pc_away_from_home_food_cost" ,   "3m_pc_gasoline_cost" , "3m_pc_fuel_cost" ,"3m_pc_away_from_home_lodge_cost", "cpi"  , "csi"  , "unemployment_rate" 
+))
+model <- lm(rv_campers ~ ., data = model_data)
+summary(model)
+
+model_data <- subset(np_data4, select = c("backcountry_campers" , "avg_min_temp" , "avg_max_temp", "avg_temp", "total_precipitation" ,   "total_snowfall" ,   "3m_pc_airfare_cost"  , "3m_pc_away_from_home_food_cost" ,   "3m_pc_gasoline_cost" , "3m_pc_fuel_cost" ,"3m_pc_away_from_home_lodge_cost", "cpi"  , "csi"  , "unemployment_rate" 
+))
+model <- lm(backcountry_campers ~ ., data = model_data)
+summary(model)
+```
+
+
+```{r}
+model_data2 <- subset(np_data4, select = c("recreation_visits","avg_min_temp" , "avg_max_temp", "avg_temp", "temp_fluctuation","total_precipitation" ,   "total_snowfall" ,   "3m_pc_airfare_cost"  , "3m_pc_away_from_home_food_cost" ,   "3m_pc_gasoline_cost" ,             
+"3m_pc_fuel_cost" ,"3m_pc_away_from_home_lodge_cost", "cpi"  , "csi"  , "unemployment_rate" 
+))
+model_data2$impact_flag <- ifelse(model_data2$recreation_visits > 100000, 1,0) 
+
+model_data3 <- subset(model_data2, select = c("impact_flag",  "avg_min_temp" , "avg_max_temp", "avg_temp", "total_precipitation" ,   "total_snowfall" ,   "3m_pc_airfare_cost"  , "3m_pc_away_from_home_food_cost" ,   "3m_pc_gasoline_cost" ,             
+"3m_pc_fuel_cost" ,"3m_pc_away_from_home_lodge_cost", "cpi"  , "csi"  , "unemployment_rate" 
+))
+
+model_data3$impact_flag <- as.factor(model_data3$impact_flag)
+tree <- rpart(impact_flag ~ ., data = model_data3)
+pred <- predict(tree, type = "class") 
+result <- table(pred,model_data3$impact_flag) 
+
+roc_pred <- predict(tree, type = "vector")
+pred_roc <- prediction(roc_pred, model_data3$impact_flag)
+roc <- performance(pred_roc, 'tpr','fpr')
+
+summary(model_data3$impact_flag)
+confusionMatrix(result)
+fancyRpartPlot(tree)
+print(tree)
+plot(roc)
+```
+
+
+```{r}
+model_result = data.frame(park_name = NA, recreational_visits=NA)
+num_parks <- as.data.frame(unique(np_data4$park_name)) 
+colnames(num_parks) <- c("park_name")
+data = subset(np_data4, np_data4$park_name == num_parks[1,])
+data1 = subset(data, select = c("recreation_visits","recreation_hrs" , "concessioner_lodging" ,  "concessioner_camping" , "tent_campers" ,   "rv_campers", "backcountry_campers", "avg_min_temp" , "avg_max_temp", "avg_temp", "total_precipitation" ,   "total_snowfall" ,   "3m_pc_airfare_cost"  , "3m_pc_away_from_home_food_cost" ,   "3m_pc_gasoline_cost" ,             
+"3m_pc_fuel_cost" ,"3m_pc_away_from_home_lodge_cost", "cpi"  , "csi"  , "unemployment_rate"))
+model =lm(recreation_visits ~ ., data = data1 )
+
+for (i in c(1:length(num_parks))){
+  data = subset(np_data4, np_data4$park_name == num_parks[[i]])
+  prom_dist2 = (max(UPC_data$PACV_DispWOFeat) - min(UPC_data$PACV_DispWOFeat)>=50)
+  fit1 = lm(UPC_data$Dollars_Display~UPC_data$PACV_DispWOFeat)
+  dollar_coef2 = fit1$coefficients[2]/mean(UPC_data$Dollars)
+  fit2 = lm(UPC_data$Units_Display~UPC_data$PACV_DispWOFeat)
+  unit_coef2 = fit2$coefficients[2]/mean(UPC_data$Units)
+  prom_effect2[i,] = list(Attrs[[i]],prom_dist2, dollar_coef2, unit_coef2)
+}
+```
+## Evaluation
+```{r}
+
+```
+## Deployment
+```{r}
+
+```
+
